@@ -561,13 +561,13 @@ Format it nicely with markdown headers, bullet points, and bold key numbers."""
         # Show all overview charts as images
         st.markdown("---")
         st.markdown("### Dashboard Charts")
-        for chart_name, chart_fig in ov_figs:
+        for idx, (chart_name, chart_fig) in enumerate(ov_figs):
             st.markdown(f"**{chart_name}**")
             try:
                 img_bytes = chart_fig.to_image(format="png", width=1200, height=500)
                 st.image(img_bytes, use_container_width=True)
             except Exception:
-                st.plotly_chart(chart_fig, use_container_width=True)
+                st.plotly_chart(chart_fig, use_container_width=True, key=f"report_chart_{idx}")
 
 
 # ===== TAB 1 : BUSINESS VISIT ==============================================
