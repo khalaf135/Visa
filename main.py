@@ -10,99 +10,55 @@ import calendar
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Page config
-# ---------------------------------------------------------------------------
 st.set_page_config(page_title="Visas Tracker 2026", page_icon="🌍", layout="wide")
 
-# ---------------------------------------------------------------------------
-# Custom CSS
-# ---------------------------------------------------------------------------
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #5CE0B8;
-        margin-bottom: 0;
-    }
-    .sub-header {
-        font-size: 1rem;
-        color: #a0aec0;
-        margin-top: -10px;
-        margin-bottom: 20px;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #5CE0B8 0%, #1B1F3B 100%);
-        padding: 20px;
-        border-radius: 12px;
-        color: white;
-        text-align: center;
-    }
-    .metric-card h3 {
-        margin: 0;
-        font-size: 2rem;
-        font-weight: 700;
-    }
-    .metric-card p {
-        margin: 5px 0 0 0;
-        font-size: 0.9rem;
-        opacity: 0.85;
-    }
+    .main-header { font-size: 2.2rem; font-weight: 700; color: #5CE0B8; margin-bottom: 0; }
+    .sub-header { font-size: 1rem; color: #a0aec0; margin-top: -10px; margin-bottom: 20px; }
+    .metric-card { background: linear-gradient(135deg, #5CE0B8 0%, #1B1F3B 100%); padding: 20px; border-radius: 12px; color: white; text-align: center; }
+    .metric-card h3 { margin: 0; font-size: 2rem; font-weight: 700; }
+    .metric-card p { margin: 5px 0 0 0; font-size: 0.9rem; opacity: 0.85; }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0 0; padding: 10px 20px; }
     div[data-testid="stChatMessage"] { border-radius: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 CHART_TYPES = ["Bar", "Pie", "Donut", "Line", "Area", "Treemap", "Sunburst", "Funnel", "Scatter", "Histogram", "Heatmap"]
 NAGARRO_COLORS = ["#5CE0B8", "#1B1F3B", "#C4C4CC", "#8B7EB8", "#3D6B6B", "#A8E6CF"]
 COLOR_SCALES = {
     "Nagarro": NAGARRO_COLORS,
-    "Viridis": px.colors.sequential.Viridis,
-    "Plasma": px.colors.sequential.Plasma,
-    "Inferno": px.colors.sequential.Inferno,
-    "Magma": px.colors.sequential.Magma,
-    "Cividis": px.colors.sequential.Cividis,
-    "Turbo": px.colors.sequential.Turbo,
-    "Rainbow": px.colors.qualitative.Set3,
-    "Bold": px.colors.qualitative.Bold,
-    "Pastel": px.colors.qualitative.Pastel,
-    "Sunset": px.colors.sequential.Sunset,
-    "Teal": px.colors.sequential.Teal,
-    "Berry": px.colors.sequential.Magenta,
-    "Earth": px.colors.sequential.Brwnyl,
-    "Ice": px.colors.sequential.ice,
+    "Viridis": px.colors.sequential.Viridis, "Plasma": px.colors.sequential.Plasma,
+    "Inferno": px.colors.sequential.Inferno, "Magma": px.colors.sequential.Magma,
+    "Cividis": px.colors.sequential.Cividis, "Turbo": px.colors.sequential.Turbo,
+    "Rainbow": px.colors.qualitative.Set3, "Bold": px.colors.qualitative.Bold,
+    "Pastel": px.colors.qualitative.Pastel, "Sunset": px.colors.sequential.Sunset,
+    "Teal": px.colors.sequential.Teal, "Berry": px.colors.sequential.Magenta,
+    "Earth": px.colors.sequential.Brwnyl, "Ice": px.colors.sequential.ice,
 }
+
+# Timeline Oct 2025 – Dec 2026
+TIMELINE = [(2025, m) for m in range(10, 13)] + [(2026, m) for m in range(1, 13)]
+TIMELINE_LABELS = [f"{calendar.month_abbr[m].upper()} {y}" for y, m in TIMELINE]
+LINE_COLORS = {"Business": "#5CE0B8", "Temporary": "#1B1F3B", "Permanent": "#C4C4CC"}
 
 
 # ---------------------------------------------------------------------------
-# Helper: read sheets with correct header rows
+# Helpers
 # ---------------------------------------------------------------------------
 @st.cache_data
 def load_excel(file_bytes: bytes) -> dict[str, pd.DataFrame]:
     xls = pd.ExcelFile(io.BytesIO(file_bytes), engine="openpyxl")
-    sheets: dict[str, pd.DataFrame] = {}
-
-    # Map of key -> (partial sheet name match, header row 0-indexed)
-    targets = {
-        "business_visit": ("business visit", 2),
-        "temp_work": ("temporary work", 3),
-        "perm_work": ("permanent work", 3),
-    }
-
+    sheets = {}
+    targets = {"business_visit": ("business visit", 2), "temp_work": ("temporary work", 3), "perm_work": ("permanent work", 3)}
     for key, (match_str, hdr_row) in targets.items():
         for sn in xls.sheet_names:
             if match_str in sn.lower():
                 df = pd.read_excel(xls, sheet_name=sn, header=hdr_row)
                 df.columns = [str(c).strip() for c in df.columns]
-                # drop fully empty rows
                 df = df.dropna(how="all")
-                # drop rows where name column is empty (catches formula-only rows)
                 name_col = None
                 for candidate in ["Employee Name", "Name"]:
                     if candidate in df.columns:
@@ -118,20 +74,44 @@ def load_excel(file_bytes: bytes) -> dict[str, pd.DataFrame]:
                     df = df[df[name_col].astype(str).str.strip() != ""]
                 sheets[key] = df
                 break
-
     return sheets
 
 
-def clean_num(series: pd.Series) -> pd.Series:
-    return pd.to_numeric(series, errors="coerce")
+def find_col(df, *keywords):
+    for kw in keywords:
+        matches = [c for c in df.columns if kw.lower() in c.lower()]
+        if matches:
+            return matches[0]
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Helper: build a Plotly figure
-# ---------------------------------------------------------------------------
+def get_nationality(df):
+    col = find_col(df, "national")
+    return df[col].dropna().astype(str).str.strip() if col else pd.Series(dtype=str)
+
+
+def get_passport(df):
+    col = find_col(df, "passport")
+    return df[col].dropna().astype(str).str.strip() if col else pd.Series(dtype=str)
+
+
+def get_occupation(df):
+    col = find_col(df, "occup", "profes")
+    return df[col].dropna().astype(str).str.strip() if col else pd.Series(dtype=str)
+
+
+def get_date(df):
+    col = find_col(df, "issuance", "issue date", "visa issue")
+    return pd.to_datetime(df[col], errors="coerce").dropna() if col else pd.Series(dtype="datetime64[ns]")
+
+
+def get_name(df):
+    col = find_col(df, "employee name", "name")
+    return df[col].dropna().astype(str).str.strip() if col else pd.Series(dtype=str)
+
+
 def make_chart(df, x, y, chart_type, color_scale, height, title=""):
     cs = color_scale
-
     if chart_type == "Bar":
         if y:
             fig = px.bar(df, x=x, y=y, color=x, color_discrete_sequence=cs, title=title)
@@ -195,74 +175,133 @@ def make_chart(df, x, y, chart_type, color_scale, height, title=""):
             fig = px.histogram(df, x=x, color_discrete_sequence=cs, title=title)
     else:
         fig = px.bar(df, x=x, color_discrete_sequence=cs, title=title)
+    fig.update_layout(height=height, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                      font=dict(size=12), margin=dict(l=40, r=40, t=60, b=40), title_font_size=16)
+    return fig
 
-    fig.update_layout(
-        height=height, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(size=12), margin=dict(l=40, r=40, t=60, b=40), title_font_size=16,
-    )
+
+def make_expense_line(records, title, height, color="#5CE0B8"):
+    """Build a line chart from a list of {Year, Month_Num, Cost} records over TIMELINE."""
+    df = pd.DataFrame(records) if records else pd.DataFrame(columns=["Year", "Month_Num", "Cost"])
+    costs = []
+    for y, m in TIMELINE:
+        if not df.empty:
+            val = df[(df["Year"] == y) & (df["Month_Num"] == m)]["Cost"].sum()
+        else:
+            val = 0
+        costs.append(val)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=TIMELINE_LABELS, y=costs, mode="lines+markers", name="Cost",
+        line=dict(width=3, color=color), marker=dict(size=8, color=color),
+        text=[f"{c:,.0f}" for c in costs], textposition="top center",
+    ))
+    fig.update_layout(title=title, xaxis_title="", yaxis_title="SAR",
+                      height=height, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                      margin=dict(l=40, r=40, t=60, b=40), title_font_size=16, showlegend=False)
+    return fig
+
+
+def make_multi_expense_line(series_dict, title, height):
+    """series_dict: {name: [{Year, Month_Num, Cost}]}"""
+    colors = ["#5CE0B8", "#1B1F3B", "#C4C4CC", "#8B7EB8"]
+    fig = go.Figure()
+    for i, (name, records) in enumerate(series_dict.items()):
+        df = pd.DataFrame(records) if records else pd.DataFrame(columns=["Year", "Month_Num", "Cost"])
+        costs = []
+        for y, m in TIMELINE:
+            val = df[(df["Year"] == y) & (df["Month_Num"] == m)]["Cost"].sum() if not df.empty else 0
+            costs.append(val)
+        clr = colors[i % len(colors)]
+        fig.add_trace(go.Scatter(
+            x=TIMELINE_LABELS, y=costs, mode="lines+markers", name=name,
+            line=dict(width=3, color=clr), marker=dict(size=8, color=clr),
+        ))
+    fig.update_layout(title=title, xaxis_title="", yaxis_title="SAR",
+                      height=height, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                      margin=dict(l=40, r=40, t=60, b=40), title_font_size=16,
+                      legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
     return fig
 
 
 # ---------------------------------------------------------------------------
-# Helpers: extract columns by keyword
+# Expense helpers — extract cost records per visa type
 # ---------------------------------------------------------------------------
-def find_col(df, *keywords):
-    for kw in keywords:
-        matches = [c for c in df.columns if kw.lower() in c.lower()]
-        if matches:
-            return matches[0]
-    return None
+def get_bv_expenses(df):
+    """Business Visit: total = COC fee per visa, date = issuance date."""
+    date_col = find_col(df, "issuance", "date")
+    cost_col = find_col(df, "cost", "fee")
+    records = []
+    if date_col and cost_col:
+        for _, row in df.iterrows():
+            d = pd.to_datetime(row[date_col], errors="coerce")
+            c = pd.to_numeric(row[cost_col], errors="coerce")
+            if pd.notna(d) and pd.notna(c):
+                records.append({"Year": d.year, "Month_Num": d.month, "Cost": c})
+    return records
 
 
-def get_nationality(df):
-    col = find_col(df, "national")
-    if col is None:
-        return pd.Series(dtype=str)
-    return df[col].dropna().astype(str).str.strip()
+def get_tw_expenses(df):
+    """Temporary Work: total = sum of all fee columns, date = Visa Issue Date."""
+    date_col = find_col(df, "visa issue", "issue date")
+    fee_cols = [c for c in df.columns if "fee" in c.lower()]
+    total_col = find_col(df, "total")
+    records = []
+    for _, row in df.iterrows():
+        d = pd.to_datetime(row.get(date_col), errors="coerce") if date_col else pd.NaT
+        if pd.isna(d):
+            continue
+        if total_col:
+            cost = pd.to_numeric(row[total_col], errors="coerce")
+        else:
+            cost = sum(pd.to_numeric(row.get(fc, 0), errors="coerce") or 0 for fc in fee_cols)
+        if pd.notna(cost) and cost > 0:
+            records.append({"Year": d.year, "Month_Num": d.month, "Cost": cost})
+    return records
 
 
-def get_passport(df):
-    col = find_col(df, "passport")
-    if col is None:
-        return pd.Series(dtype=str)
-    return df[col].dropna().astype(str).str.strip()
+def get_pw_expenses(df):
+    """Permanent Work: returns (before_arrival, after_arrival, total) record lists."""
+    date_col = find_col(df, "visa issue")
+    before_keys = ["moi fee", "coc fee", "mofa fee", "document shipping"]
+    after_keys = ["medical", "work permit", "sce", "iqama", "health insurance"]
+    before_cols = [c for c in df.columns if any(k in c.lower() for k in before_keys)]
+    after_cols = [c for c in df.columns if any(k in c.lower() for k in after_keys)]
+    total_col = find_col(df, "total")
 
-
-def get_occupation(df):
-    col = find_col(df, "occup", "profes")
-    if col is None:
-        return pd.Series(dtype=str)
-    return df[col].dropna().astype(str).str.strip()
-
-
-def get_date(df):
-    col = find_col(df, "issuance", "issue date", "visa issue")
-    if col is None:
-        return pd.Series(dtype="datetime64[ns]")
-    return pd.to_datetime(df[col], errors="coerce").dropna()
-
-
-def get_name(df):
-    col = find_col(df, "employee name", "name")
-    if col is None:
-        return pd.Series(dtype=str)
-    return df[col].dropna().astype(str).str.strip()
+    before_records, after_records, total_records = [], [], []
+    for _, row in df.iterrows():
+        d = pd.to_datetime(row.get(date_col), errors="coerce") if date_col else pd.NaT
+        if pd.isna(d):
+            continue
+        ym = {"Year": d.year, "Month_Num": d.month}
+        b = sum(pd.to_numeric(row.get(c, 0), errors="coerce") or 0 for c in before_cols)
+        a = sum(pd.to_numeric(row.get(c, 0), errors="coerce") or 0 for c in after_cols)
+        if total_col:
+            t = pd.to_numeric(row[total_col], errors="coerce")
+            if pd.isna(t):
+                t = b + a
+        else:
+            t = b + a
+        if b > 0:
+            before_records.append({**ym, "Cost": b})
+        if a > 0:
+            after_records.append({**ym, "Cost": a})
+        if t > 0:
+            total_records.append({**ym, "Cost": t})
+    return before_records, after_records, total_records
 
 
 # ---------------------------------------------------------------------------
 # Groq Chat
 # ---------------------------------------------------------------------------
-def ask_groq(question: str, data_context: str) -> str:
+def ask_groq(question, data_context):
     try:
         client = Groq(api_key=GROQ_API_KEY)
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": (
-                    "You are a helpful data analyst assistant for 2026 visa tracking data. "
-                    "The data covers Business Visit Visas, Temporary Work Visas, and Permanent Work Visas for 2026. "
-                    "Answer accurately. Use markdown. Be precise with numbers."
-                )},
+                {"role": "system", "content": "You are a helpful data analyst for 2026 visa tracking data. Answer accurately with markdown."},
                 {"role": "user", "content": f"2026 visa data:\n\n{data_context}\n\nQuestion: {question}"},
             ],
             temperature=0.2, max_tokens=2048,
@@ -291,9 +330,6 @@ def build_data_context(sheets):
 st.markdown('<p class="main-header">Visas Tracker 2026</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Upload your Excel file to explore 2026 visa data with interactive charts and AI chat</p>', unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
 with st.sidebar:
     st.image("assets/nagarro_logo.png", width=80)
     st.markdown("### Settings")
@@ -307,9 +343,6 @@ with st.sidebar:
     st.divider()
     st.caption("Built with Streamlit, Plotly & Groq AI")
 
-# ---------------------------------------------------------------------------
-# No file
-# ---------------------------------------------------------------------------
 if uploaded is None:
     st.info("Upload your **Visas Tracker .xlsx** file in the sidebar to get started.")
     c1, c2, c3 = st.columns(3)
@@ -326,7 +359,6 @@ if uploaded is None:
 # ---------------------------------------------------------------------------
 file_bytes = uploaded.read()
 sheets = load_excel(file_bytes)
-
 if not sheets:
     st.error("Could not find the expected sheets. Check the file format.")
     st.stop()
@@ -340,35 +372,33 @@ n_tw = len(tw) if tw is not None else 0
 n_pw = len(pw) if pw is not None else 0
 n_total = n_bv + n_tw + n_pw
 
-# Collect all nationalities, passports, occupations, dates per type
+# Collect metadata
 all_nat, all_pass, all_occ = [], [], []
 type_labels = {"business_visit": "Business", "temp_work": "Temporary", "perm_work": "Permanent"}
 visa_type_list = []
-monthly_records = []  # (month_num, type_label)
+monthly_records = []
 
 for key, df in sheets.items():
     label = type_labels[key]
     n = len(df)
     visa_type_list.extend([label] * n)
-
-    nats = get_nationality(df)
-    all_nat.extend(nats.tolist())
-
-    passports = get_passport(df)
-    all_pass.extend(passports.tolist())
-
+    all_nat.extend(get_nationality(df).tolist())
+    all_pass.extend(get_passport(df).tolist())
     occs = get_occupation(df)
     all_occ.extend(occs.tolist())
-    # for business visit, occupation is not specified
     if key == "business_visit":
         all_occ.extend(["Not Specified"] * (n - len(occs)))
-
-    dates = get_date(df)
-    for d in dates:
+    for d in get_date(df):
         monthly_records.append({"Year": d.year, "Month_Num": d.month, "Type": label})
 
 n_nationalities = len(set(all_nat))
 n_passports = len(set(all_pass))
+
+# Pre-compute expenses
+bv_exp = get_bv_expenses(bv) if bv is not None else []
+tw_exp = get_tw_expenses(tw) if tw is not None else []
+pw_before, pw_after, pw_total = get_pw_expenses(pw) if pw is not None else ([], [], [])
+all_exp = bv_exp + tw_exp + pw_total  # combined
 
 # ---------------------------------------------------------------------------
 # KPI row
@@ -380,18 +410,16 @@ with c2:
     st.markdown(f'<div class="metric-card"><h3>{n_tw}</h3><p>Temporary Work Visas</p></div>', unsafe_allow_html=True)
 with c3:
     st.markdown(f'<div class="metric-card"><h3>{n_pw}</h3><p>Permanent Work Visas</p></div>', unsafe_allow_html=True)
-
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
-tabs = st.tabs(["Overview", "Business Visit", "Temporary Work", "Permanent Work", "AI Chat"])
+tabs = st.tabs(["Overview", "Business Visit", "Temporary Work", "Permanent Work", "Expenses", "AI Chat"])
 
 # ===== TAB 0 : OVERVIEW ====================================================
 with tabs[0]:
     st.subheader("2026 Overview Dashboard")
-
     oc1, oc2, oc3 = st.columns(3)
     with oc1:
         ov_chart = st.selectbox("Chart type", CHART_TYPES, index=0, key="ov_chart")
@@ -401,58 +429,38 @@ with tabs[0]:
     with oc3:
         ov_h = st.slider("Height", 300, 800, chart_height, 50, key="ov_h")
 
-    # --- ROW 1: Summary (with numbers on top) ---
+    # Summary metrics
     st.markdown("#### Summary")
     sm1, sm2, sm3, sm4 = st.columns(4)
-    summary_items = [
-        ("Visa Types", 3),
-        ("Nationalities", n_nationalities),
-        ("Passport Numbers", n_passports),
-        ("Visas", n_total),
-    ]
-    for col, (label, val) in zip([sm1, sm2, sm3, sm4], summary_items):
+    for col, (label, val) in zip([sm1, sm2, sm3, sm4], [("Visa Types", 3), ("Nationalities", n_nationalities), ("Passport Numbers", n_passports), ("Visas", n_total)]):
         with col:
             st.metric(label, val)
-
     st.markdown("---")
 
-    # --- ROW 2: Nationality | Visa Type ---
+    # Nationality | Visa Type
     r2c1, r2c2 = st.columns(2)
-
     with r2c1:
         if all_nat:
-            nat_df = pd.DataFrame({"Nationality": all_nat})
-            fig = make_chart(nat_df, "Nationality", None, ov_chart, ov_color, ov_h, "Nationality")
+            fig = make_chart(pd.DataFrame({"Nationality": all_nat}), "Nationality", None, ov_chart, ov_color, ov_h, "Nationality")
             st.plotly_chart(fig, use_container_width=True)
-
     with r2c2:
-        vtype_df = pd.DataFrame({"Visa Type": visa_type_list})
-        fig = make_chart(vtype_df, "Visa Type", None, ov_chart, ov_color, ov_h, "Visa Type")
+        fig = make_chart(pd.DataFrame({"Visa Type": visa_type_list}), "Visa Type", None, ov_chart, ov_color, ov_h, "Visa Type")
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- ROW 3: Occupations (full width, bigger) ---
+    # Occupations
     if all_occ:
-        occ_df = pd.DataFrame({"Occupation": all_occ})
-        fig = make_chart(occ_df, "Occupation", None, ov_chart, ov_color, ov_h + 100, "Occupations")
+        fig = make_chart(pd.DataFrame({"Occupation": all_occ}), "Occupation", None, ov_chart, ov_color, ov_h + 100, "Occupations")
         st.plotly_chart(fig, use_container_width=True)
-
     st.markdown("---")
 
-    # --- ROW 4: Redundancy table (with Name) ---
+    # Redundancy
     st.markdown("#### Redundancy")
     pass_nat_records = []
     for key, df in sheets.items():
-        p_col = find_col(df, "passport")
-        n_col = find_col(df, "national")
-        name_c = find_col(df, "employee name", "name")
+        p_col, n_col, name_c = find_col(df, "passport"), find_col(df, "national"), find_col(df, "employee name", "name")
         if p_col and n_col and name_c:
             for _, row in df[[p_col, n_col, name_c]].dropna().iterrows():
-                pass_nat_records.append({
-                    "Passport Number": str(row[p_col]).strip(),
-                    "Name": str(row[name_c]).strip(),
-                    "Nationality": str(row[n_col]).strip(),
-                })
-
+                pass_nat_records.append({"Passport Number": str(row[p_col]).strip(), "Name": str(row[name_c]).strip(), "Nationality": str(row[n_col]).strip()})
     if pass_nat_records:
         pn_df = pd.DataFrame(pass_nat_records)
         pn_counts = pn_df.groupby(["Passport Number", "Name", "Nationality"]).size().reset_index(name="Count")
@@ -461,47 +469,38 @@ with tabs[0]:
             st.dataframe(redundant, use_container_width=True, hide_index=True)
         else:
             st.info("No duplicate passport numbers found.")
-    else:
-        st.info("No passport data available.")
-
     st.markdown("---")
 
-    # --- ROW 3: Monthly Visa Issuance (Oct 2025 – Dec 2026) ---
+    # Monthly Visa Issuance
     st.markdown("#### Monthly Visa Issuance")
-    # Build month slots from Oct 2025 to Dec 2026
-    timeline = []
-    for m in range(10, 13):  # Oct, Nov, Dec 2025
-        timeline.append((2025, m))
-    for m in range(1, 13):   # Jan–Dec 2026
-        timeline.append((2026, m))
-    timeline_labels = [f"{calendar.month_abbr[m].upper()} {y}" for y, m in timeline]
-
     monthly_df = pd.DataFrame(monthly_records) if monthly_records else pd.DataFrame(columns=["Year", "Month_Num", "Type"])
-    line_colors = {"Business": "#5CE0B8", "Temporary": "#1B1F3B", "Permanent": "#C4C4CC"}
     fig = go.Figure()
     for vtype in ["Business", "Temporary", "Permanent"]:
         subset = monthly_df[monthly_df["Type"] == vtype] if not monthly_df.empty else pd.DataFrame()
         counts = []
-        for y, m in timeline:
-            if not subset.empty:
-                cnt = len(subset[(subset["Year"] == y) & (subset["Month_Num"] == m)])
-            else:
-                cnt = 0
-            counts.append(cnt)
-        fig.add_trace(go.Scatter(
-            x=timeline_labels, y=counts, mode="lines+markers", name=vtype,
-            line=dict(width=3, color=line_colors[vtype]),
-            marker=dict(size=8, color=line_colors[vtype]),
-        ))
-
-    fig.update_layout(
-        title="MONTHLY VISA ISSUANCE (OCT 2025 – DEC 2026)",
-        xaxis_title="", yaxis_title="VISAS ISSUED",
-        height=ov_h + 50, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=40, r=40, t=60, b=40), title_font_size=16,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-    )
+        for y, m in TIMELINE:
+            counts.append(len(subset[(subset["Year"] == y) & (subset["Month_Num"] == m)]) if not subset.empty else 0)
+        fig.add_trace(go.Scatter(x=TIMELINE_LABELS, y=counts, mode="lines+markers", name=vtype,
+                                 line=dict(width=3, color=LINE_COLORS[vtype]), marker=dict(size=8, color=LINE_COLORS[vtype])))
+    fig.update_layout(title="MONTHLY VISA ISSUANCE (OCT 2025 – DEC 2026)", xaxis_title="", yaxis_title="VISAS ISSUED",
+                      height=ov_h + 50, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                      margin=dict(l=40, r=40, t=60, b=40), title_font_size=16,
+                      legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
     st.plotly_chart(fig, use_container_width=True)
+    st.markdown("---")
+
+    # Monthly Expenses per visa type (3 charts)
+    st.markdown("#### Monthly Expenses by Visa Type")
+    ex1, ex2, ex3 = st.columns(3)
+    with ex1:
+        fig = make_expense_line(bv_exp, "Business Visit Expenses", ov_h, "#5CE0B8")
+        st.plotly_chart(fig, use_container_width=True)
+    with ex2:
+        fig = make_expense_line(tw_exp, "Temporary Work Expenses", ov_h, "#1B1F3B")
+        st.plotly_chart(fig, use_container_width=True)
+    with ex3:
+        fig = make_expense_line(pw_total, "Permanent Work Expenses", ov_h, "#C4C4CC")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # ===== TAB 1 : BUSINESS VISIT ==============================================
@@ -523,21 +522,17 @@ with tabs[1]:
         nc = find_col(bv, "national")
         if nc:
             with b1:
-                fig = make_chart(bv, nc, None, bv_chart, bv_c, bv_h, "By Nationality")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(make_chart(bv, nc, None, bv_chart, bv_c, bv_h, "By Nationality"), use_container_width=True)
         rc = find_col(bv, "requester")
         if rc:
             with b2:
-                fig = make_chart(bv, rc, None, bv_chart, bv_c, bv_h, "By Requester")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(make_chart(bv, rc, None, bv_chart, bv_c, bv_h, "By Requester"), use_container_width=True)
         hc = find_col(bv, "handle")
         if hc:
-            fig = make_chart(bv, hc, None, bv_chart, bv_c, bv_h, "By Handler")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(make_chart(bv, hc, None, bv_chart, bv_c, bv_h, "By Handler"), use_container_width=True)
         cc = find_col(bv, "collect")
         if cc:
-            fig = make_chart(bv, cc, None, bv_chart, bv_c, bv_h, "By Collection City")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(make_chart(bv, cc, None, bv_chart, bv_c, bv_h, "By Collection City"), use_container_width=True)
         dc = find_col(bv, "issuance", "date")
         if dc:
             bv_d = bv.copy()
@@ -545,10 +540,15 @@ with tabs[1]:
             bv_d = bv_d.dropna(subset=[dc])
             if not bv_d.empty:
                 bv_d["Month"] = bv_d[dc].dt.to_period("M").astype(str)
-                fig = make_chart(bv_d, "Month", None,
-                                 "Line" if bv_chart in ["Pie", "Donut", "Treemap", "Sunburst"] else bv_chart,
-                                 bv_c, bv_h, "Issuance Trend by Month")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(make_chart(bv_d, "Month", None, "Line" if bv_chart in ["Pie", "Donut", "Treemap", "Sunburst"] else bv_chart, bv_c, bv_h, "Issuance Trend by Month"), use_container_width=True)
+
+        # Expense line chart
+        st.markdown("---")
+        st.markdown("#### Total Expenses (COC Fee)")
+        bv_total_cost = sum(r["Cost"] for r in bv_exp)
+        st.metric("Total Business Visit Cost", f"{bv_total_cost:,.0f} SAR")
+        fig = make_expense_line(bv_exp, "Business Visit Monthly Expenses", bv_h, "#5CE0B8")
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Business Visit Visa 2026 sheet not found.")
 
@@ -572,27 +572,29 @@ with tabs[2]:
         nc = find_col(tw, "national")
         if nc:
             with t1:
-                fig = make_chart(tw, nc, None, tw_chart, tw_c, tw_h, "By Nationality")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(make_chart(tw, nc, None, tw_chart, tw_c, tw_h, "By Nationality"), use_container_width=True)
         oc = find_col(tw, "occup", "profes")
         if oc:
             with t2:
-                fig = make_chart(tw, oc, None, tw_chart, tw_c, tw_h, "By Occupation")
-                st.plotly_chart(fig, use_container_width=True)
-
+                st.plotly_chart(make_chart(tw, oc, None, tw_chart, tw_c, tw_h, "By Occupation"), use_container_width=True)
         emb = find_col(tw, "embassy")
         if emb:
-            fig = make_chart(tw, emb, None, tw_chart, tw_c, tw_h, "By Embassy")
-            st.plotly_chart(fig, use_container_width=True)
-
+            st.plotly_chart(make_chart(tw, emb, None, tw_chart, tw_c, tw_h, "By Embassy"), use_container_width=True)
         fee_cols = [c for c in tw.columns if "fee" in c.lower()]
         if fee_cols:
             tw_fees = tw[fee_cols].apply(pd.to_numeric, errors="coerce").sum().reset_index()
             tw_fees.columns = ["Fee Type", "Total"]
             tw_fees = tw_fees[tw_fees["Total"] > 0]
             if not tw_fees.empty:
-                fig = make_chart(tw_fees, "Fee Type", "Total", tw_chart, tw_c, tw_h, "Fee Breakdown")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(make_chart(tw_fees, "Fee Type", "Total", tw_chart, tw_c, tw_h, "Fee Breakdown"), use_container_width=True)
+
+        # Expense line chart
+        st.markdown("---")
+        st.markdown("#### Total Expenses")
+        tw_total_cost = sum(r["Cost"] for r in tw_exp)
+        st.metric("Total Temporary Work Cost", f"{tw_total_cost:,.0f} SAR")
+        fig = make_expense_line(tw_exp, "Temporary Work Monthly Expenses", tw_h, "#5CE0B8")
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Temporary Work Visa 2026 sheet not found.")
 
@@ -616,19 +618,14 @@ with tabs[3]:
         nc = find_col(pw, "national")
         if nc:
             with p1:
-                fig = make_chart(pw, nc, None, pw_chart, pw_c, pw_h, "By Nationality")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(make_chart(pw, nc, None, pw_chart, pw_c, pw_h, "By Nationality"), use_container_width=True)
         pc_col = find_col(pw, "project")
         if pc_col:
             with p2:
-                fig = make_chart(pw, pc_col, None, pw_chart, pw_c, pw_h, "By Project")
-                st.plotly_chart(fig, use_container_width=True)
-
+                st.plotly_chart(make_chart(pw, pc_col, None, pw_chart, pw_c, pw_h, "By Project"), use_container_width=True)
         prof = find_col(pw, "profes", "occup")
         if prof:
-            fig = make_chart(pw, prof, None, pw_chart, pw_c, pw_h, "By Profession")
-            st.plotly_chart(fig, use_container_width=True)
-
+            st.plotly_chart(make_chart(pw, prof, None, pw_chart, pw_c, pw_h, "By Profession"), use_container_width=True)
         fee_names = ["MOI Fee", "COC Fee", "MOFA Fee"]
         found_fees = [c for c in pw.columns if any(f.lower() in c.lower() for f in fee_names)]
         if found_fees:
@@ -636,34 +633,131 @@ with tabs[3]:
             pw_fees.columns = ["Fee Type", "Total"]
             pw_fees = pw_fees[pw_fees["Total"] > 0]
             if not pw_fees.empty:
-                fig = make_chart(pw_fees, "Fee Type", "Total", pw_chart, pw_c, pw_h, "Fee Breakdown")
-                st.plotly_chart(fig, use_container_width=True)
-
+                st.plotly_chart(make_chart(pw_fees, "Fee Type", "Total", pw_chart, pw_c, pw_h, "Fee Breakdown"), use_container_width=True)
         city = find_col(pw, "city")
         if city:
-            fig = make_chart(pw, city, None, pw_chart, pw_c, pw_h, "By City")
+            st.plotly_chart(make_chart(pw, city, None, pw_chart, pw_c, pw_h, "By City"), use_container_width=True)
+
+        # 4 Expense line charts
+        st.markdown("---")
+        st.markdown("#### Permanent Work Expenses")
+        pw_before_total = sum(r["Cost"] for r in pw_before)
+        pw_after_total = sum(r["Cost"] for r in pw_after)
+        pw_grand_total = sum(r["Cost"] for r in pw_total)
+        em1, em2, em3 = st.columns(3)
+        with em1:
+            st.metric("Before Arrival", f"{pw_before_total:,.0f} SAR")
+        with em2:
+            st.metric("After Arrival", f"{pw_after_total:,.0f} SAR")
+        with em3:
+            st.metric("Grand Total", f"{pw_grand_total:,.0f} SAR")
+
+        pe1, pe2 = st.columns(2)
+        with pe1:
+            fig = make_expense_line(pw_before, "Before Arrival to KSA (Monthly)", pw_h, "#5CE0B8")
             st.plotly_chart(fig, use_container_width=True)
+        with pe2:
+            fig = make_expense_line(pw_after, "After Arrival in KSA (Monthly)", pw_h, "#1B1F3B")
+            st.plotly_chart(fig, use_container_width=True)
+
+        fig = make_expense_line(pw_total, "Total Permanent Work Expenses (Monthly)", pw_h, "#8B7EB8")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # All 3 on one chart
+        fig = make_multi_expense_line(
+            {"Before Arrival": pw_before, "After Arrival": pw_after, "Total": pw_total},
+            "Permanent Work — All Expense Categories", pw_h + 50)
+        st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Permanent Work Visa 2026 sheet not found.")
 
 
-# ===== TAB 4 : AI CHAT =====================================================
+# ===== TAB 4 : EXPENSES ====================================================
 with tabs[4]:
+    st.subheader("Expenses Overview")
+    st.caption("Total spending across all visa types from Oct 2025 to Dec 2026")
+
+    # Grand totals
+    total_bv = sum(r["Cost"] for r in bv_exp)
+    total_tw = sum(r["Cost"] for r in tw_exp)
+    total_pw = sum(r["Cost"] for r in pw_total)
+    grand_total = total_bv + total_tw + total_pw
+
+    e1, e2, e3, e4 = st.columns(4)
+    with e1:
+        st.metric("Business Visit", f"{total_bv:,.0f} SAR")
+    with e2:
+        st.metric("Temporary Work", f"{total_tw:,.0f} SAR")
+    with e3:
+        st.metric("Permanent Work", f"{total_pw:,.0f} SAR")
+    with e4:
+        st.markdown(f'<div class="metric-card"><h3>{grand_total:,.0f}</h3><p>Total Spent (SAR)</p></div>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    # Combined monthly line chart — all types + total
+    st.markdown("#### Monthly Spending by Visa Type")
+    fig = make_multi_expense_line(
+        {"Business Visit": bv_exp, "Temporary Work": tw_exp, "Permanent Work": pw_total, "All Combined": all_exp},
+        "Monthly Expenses — All Visa Types (OCT 2025 – DEC 2026)", 500)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Individual charts side by side
+    st.markdown("---")
+    st.markdown("#### Individual Visa Type Expenses")
+    ie1, ie2, ie3 = st.columns(3)
+    with ie1:
+        fig = make_expense_line(bv_exp, "Business Visit", 400, "#5CE0B8")
+        st.plotly_chart(fig, use_container_width=True)
+    with ie2:
+        fig = make_expense_line(tw_exp, "Temporary Work", 400, "#1B1F3B")
+        st.plotly_chart(fig, use_container_width=True)
+    with ie3:
+        fig = make_expense_line(pw_total, "Permanent Work", 400, "#C4C4CC")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Monthly total table
+    st.markdown("---")
+    st.markdown("#### Monthly Expense Table")
+    table_rows = []
+    for y, m in TIMELINE:
+        label = f"{calendar.month_abbr[m]} {y}"
+        bv_m = sum(r["Cost"] for r in bv_exp if r["Year"] == y and r["Month_Num"] == m)
+        tw_m = sum(r["Cost"] for r in tw_exp if r["Year"] == y and r["Month_Num"] == m)
+        pw_m = sum(r["Cost"] for r in pw_total if r["Year"] == y and r["Month_Num"] == m)
+        total_m = bv_m + tw_m + pw_m
+        if total_m > 0:
+            table_rows.append({"Month": label, "Business Visit": f"{bv_m:,.0f}", "Temporary Work": f"{tw_m:,.0f}", "Permanent Work": f"{pw_m:,.0f}", "Total": f"{total_m:,.0f}"})
+    if table_rows:
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("No expense data available.")
+
+    # Pie chart of total distribution
+    st.markdown("---")
+    st.markdown("#### Expense Distribution")
+    if grand_total > 0:
+        dist_df = pd.DataFrame({"Type": ["Business Visit", "Temporary Work", "Permanent Work"], "Cost": [total_bv, total_tw, total_pw]})
+        dist_df = dist_df[dist_df["Cost"] > 0]
+        fig = px.pie(dist_df, names="Type", values="Cost", color_discrete_sequence=NAGARRO_COLORS, title="Total Expense Distribution", hole=0.4)
+        fig.update_traces(textposition="inside", textinfo="percent+value+label")
+        fig.update_layout(height=450, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# ===== TAB 5 : AI CHAT =====================================================
+with tabs[5]:
     st.subheader("AI Data Assistant")
     st.caption("Ask any question about your 2026 visa data. Powered by Groq (Llama 3.3 70B).")
 
     if "data_context" not in st.session_state:
         st.session_state.data_context = build_data_context(sheets)
-
     if "messages" not in st.session_state:
         st.session_state.messages = [
             {"role": "assistant", "content": "Hello! I'm your 2026 visa data assistant. Ask me anything about Business Visit, Temporary Work, or Permanent Work visas."}
         ]
-
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-
     if prompt := st.chat_input("Ask about your 2026 visa data..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
