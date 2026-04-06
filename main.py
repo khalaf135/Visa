@@ -23,9 +23,7 @@ st.markdown("""
     .main-header {
         font-size: 2.2rem;
         font-weight: 700;
-        background: linear-gradient(90deg, #86BC25, #6240A8);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        color: #5CE0B8;
         margin-bottom: 0;
     }
     .sub-header {
@@ -35,7 +33,7 @@ st.markdown("""
         margin-bottom: 20px;
     }
     .metric-card {
-        background: linear-gradient(135deg, #86BC25 0%, #6240A8 100%);
+        background: linear-gradient(135deg, #5CE0B8 0%, #1B1F3B 100%);
         padding: 20px;
         border-radius: 12px;
         color: white;
@@ -63,7 +61,7 @@ st.markdown("""
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
 CHART_TYPES = ["Bar", "Pie", "Donut", "Line", "Area", "Treemap", "Sunburst", "Funnel", "Scatter", "Histogram", "Heatmap"]
 COLOR_SCALES = {
-    "Default Blue": px.colors.sequential.Blues,
+    "Nagarro": NAGARRO_COLORS,
     "Viridis": px.colors.sequential.Viridis,
     "Plasma": px.colors.sequential.Plasma,
     "Inferno": px.colors.sequential.Inferno,
@@ -80,8 +78,7 @@ COLOR_SCALES = {
     "Ice": px.colors.sequential.ice,
 }
 
-DARK_BLUE = "#1e3a5f"
-NAVY_COLORS = ["#1e3a5f", "#2c5282", "#3182ce", "#4a90d9", "#63b3ed", "#90cdf4"]
+NAGARRO_COLORS = ["#5CE0B8", "#1B1F3B", "#C4C4CC", "#8B7EB8", "#3D6B6B", "#A8E6CF"]
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +478,7 @@ with tabs[0]:
     timeline_labels = [f"{calendar.month_abbr[m].upper()} {y}" for y, m in timeline]
 
     monthly_df = pd.DataFrame(monthly_records) if monthly_records else pd.DataFrame(columns=["Year", "Month_Num", "Type"])
+    line_colors = {"Business": "#5CE0B8", "Temporary": "#1B1F3B", "Permanent": "#C4C4CC"}
     fig = go.Figure()
     for vtype in ["Business", "Temporary", "Permanent"]:
         subset = monthly_df[monthly_df["Type"] == vtype] if not monthly_df.empty else pd.DataFrame()
@@ -493,7 +491,8 @@ with tabs[0]:
             counts.append(cnt)
         fig.add_trace(go.Scatter(
             x=timeline_labels, y=counts, mode="lines+markers", name=vtype,
-            line=dict(width=2), marker=dict(size=8),
+            line=dict(width=3, color=line_colors[vtype]),
+            marker=dict(size=8, color=line_colors[vtype]),
         ))
 
     fig.update_layout(
