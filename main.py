@@ -438,19 +438,23 @@ with tabs[0]:
     st.markdown("---")
 
     # Nationality | Visa Type
+    ov_figs = []  # collect for report
     r2c1, r2c2 = st.columns(2)
     with r2c1:
         if all_nat:
-            fig = make_chart(pd.DataFrame({"Nationality": all_nat}), "Nationality", None, ov_chart, ov_color, ov_h, "Nationality")
-            st.plotly_chart(fig, use_container_width=True)
+            fig_nat = make_chart(pd.DataFrame({"Nationality": all_nat}), "Nationality", None, ov_chart, ov_color, ov_h, "Nationality")
+            st.plotly_chart(fig_nat, use_container_width=True)
+            ov_figs.append(("Nationality", fig_nat))
     with r2c2:
-        fig = make_chart(pd.DataFrame({"Visa Type": visa_type_list}), "Visa Type", None, ov_chart, ov_color, ov_h, "Visa Type")
-        st.plotly_chart(fig, use_container_width=True)
+        fig_vt = make_chart(pd.DataFrame({"Visa Type": visa_type_list}), "Visa Type", None, ov_chart, ov_color, ov_h, "Visa Type")
+        st.plotly_chart(fig_vt, use_container_width=True)
+        ov_figs.append(("Visa Type", fig_vt))
 
     # Occupations
     if all_occ:
-        fig = make_chart(pd.DataFrame({"Occupation": all_occ}), "Occupation", None, ov_chart, ov_color, ov_h + 100, "Occupations")
-        st.plotly_chart(fig, use_container_width=True)
+        fig_occ = make_chart(pd.DataFrame({"Occupation": all_occ}), "Occupation", None, ov_chart, ov_color, ov_h + 100, "Occupations")
+        st.plotly_chart(fig_occ, use_container_width=True)
+        ov_figs.append(("Occupations", fig_occ))
     st.markdown("---")
 
     # Redundancy
@@ -486,21 +490,84 @@ with tabs[0]:
                       height=ov_h + 50, plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                       margin=dict(l=40, r=40, t=60, b=40), title_font_size=16,
                       legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5))
-    st.plotly_chart(fig, use_container_width=True)
+    fig_issuance = fig
+    st.plotly_chart(fig_issuance, use_container_width=True)
+    ov_figs.append(("Monthly Visa Issuance", fig_issuance))
     st.markdown("---")
 
-    # Monthly Expenses per visa type (3 charts)
+    # Monthly Expenses — all types on one chart
     st.markdown("#### Monthly Expenses by Visa Type")
-    ex1, ex2, ex3 = st.columns(3)
-    with ex1:
-        fig = make_expense_line(bv_exp, "Business Visit Expenses", ov_h, "#5CE0B8")
-        st.plotly_chart(fig, use_container_width=True)
-    with ex2:
-        fig = make_expense_line(tw_exp, "Temporary Work Expenses", ov_h, "#1B1F3B")
-        st.plotly_chart(fig, use_container_width=True)
-    with ex3:
-        fig = make_expense_line(pw_total, "Permanent Work Expenses", ov_h, "#C4C4CC")
-        st.plotly_chart(fig, use_container_width=True)
+    fig_exp = make_multi_expense_line(
+        {"Business Visit": bv_exp, "Temporary Work": tw_exp, "Permanent Work": pw_total},
+        "MONTHLY EXPENSES BY VISA TYPE (OCT 2025 – DEC 2026)", ov_h + 50)
+    st.plotly_chart(fig_exp, use_container_width=True, key="ov_expense_chart")
+    ov_figs.append(("Monthly Expenses", fig_exp))
+
+    st.markdown("---")
+
+    # Print Summary Report button
+    if st.button("Print Summary Report", type="primary", use_container_width=True, key="print_report"):
+        with st.spinner("Generating AI summary report..."):
+            # Build summary data for the AI
+            total_bv_cost = sum(r["Cost"] for r in bv_exp)
+            total_tw_cost = sum(r["Cost"] for r in tw_exp)
+            total_pw_cost = sum(r["Cost"] for r in pw_total)
+            grand = total_bv_cost + total_tw_cost + total_pw_cost
+
+            nat_summary = pd.Series(all_nat).value_counts().to_dict() if all_nat else {}
+            occ_summary = pd.Series(all_occ).value_counts().to_dict() if all_occ else {}
+
+            redundant_text = ""
+            if pass_nat_records:
+                pn_df2 = pd.DataFrame(pass_nat_records)
+                pn_c2 = pn_df2.groupby(["Passport Number", "Name", "Nationality"]).size().reset_index(name="Count")
+                red2 = pn_c2[pn_c2["Count"] > 1]
+                if not red2.empty:
+                    redundant_text = red2.to_string(index=False)
+
+            report_prompt = f"""Generate a comprehensive executive summary report for the Visas Tracker 2026 dashboard.
+
+Data Summary:
+- Total visas: {n_total} (Business Visit: {n_bv}, Temporary Work: {n_tw}, Permanent Work: {n_pw})
+- Nationalities: {n_nationalities} — breakdown: {nat_summary}
+- Unique passport numbers: {n_passports}
+- Occupations: {occ_summary}
+
+Expenses:
+- Business Visit total: {total_bv_cost:,.0f} SAR
+- Temporary Work total: {total_tw_cost:,.0f} SAR
+- Permanent Work total: {total_pw_cost:,.0f} SAR
+- Grand Total: {grand:,.0f} SAR
+
+Redundant passports (appearing more than once):
+{redundant_text if redundant_text else "None found"}
+
+Please write a professional summary report with these sections:
+1. Executive Summary
+2. Visa Distribution Overview
+3. Nationality & Workforce Analysis
+4. Expense Analysis
+5. Redundancy Alerts
+6. Key Insights & Recommendations
+
+Format it nicely with markdown headers, bullet points, and bold key numbers."""
+
+            report = ask_groq(report_prompt, "")
+
+        st.markdown("---")
+        st.markdown("## Summary Report")
+        st.markdown(report)
+
+        # Show all overview charts as images
+        st.markdown("---")
+        st.markdown("### Dashboard Charts")
+        for chart_name, chart_fig in ov_figs:
+            st.markdown(f"**{chart_name}**")
+            try:
+                img_bytes = chart_fig.to_image(format="png", width=1200, height=500)
+                st.image(img_bytes, use_container_width=True)
+            except Exception:
+                st.plotly_chart(chart_fig, use_container_width=True)
 
 
 # ===== TAB 1 : BUSINESS VISIT ==============================================

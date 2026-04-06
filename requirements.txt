@@ -4,3 +4,4 @@ openpyxl
 groq
 pandas
 python-dotenv
+kaleido
