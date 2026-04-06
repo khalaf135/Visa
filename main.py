@@ -296,7 +296,7 @@ st.markdown('<p class="sub-header">Upload your Excel file to explore 2026 visa d
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/passport.png", width=64)
+    st.image("assets/nagarro_logo.png", width=80)
     st.markdown("### Settings")
     uploaded = st.file_uploader("Upload Visas Tracker (.xlsx)", type=["xlsx"])
     st.divider()
